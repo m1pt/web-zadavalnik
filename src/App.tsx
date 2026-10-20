@@ -56,6 +56,40 @@ function App() {
     }
   };
 
+  // Parse task numbers with subtasks
+  const parseTaskNumbers = (input: string): string[] => {
+    const results: string[] = [];
+    
+    // Split by semicolons and newlines
+    const entries = input.split(/[;\n]+/).map(s => s.trim()).filter(s => s.length > 0);
+    
+    entries.forEach(entry => {
+      // Match pattern: number(subtask1, subtask2, ...)
+      const match = entry.match(/^([^(]+?)(?:\(([^)]+)\))?$/);
+      
+      if (match) {
+        const baseNumber = match[1].trim();
+        const subtasks = match[2];
+        
+        if (subtasks) {
+          // Has subtasks in parentheses
+          const subtaskList = subtasks.split(',').map(s => s.trim()).filter(s => s.length > 0);
+          subtaskList.forEach(subtask => {
+            results.push(`${baseNumber}(${subtask})`);
+          });
+        } else {
+          // No subtasks
+          results.push(baseNumber);
+        }
+      } else {
+        // Fallback: use as-is
+        results.push(entry);
+      }
+    });
+    
+    return results;
+  };
+
   // Add item (task or deadline)
   const handleAddItem = () => {
     if (!selectedSubject) return;
@@ -63,8 +97,8 @@ function App() {
     const newItems: ListItem[] = [];
     
     if (newItemType === 'task') {
-      // Parse multiple numbers separated by newlines
-      const numbers = newItemNumbers.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+      // Parse complex task format
+      const numbers = parseTaskNumbers(newItemNumbers);
       if (numbers.length === 0) return;
       
       numbers.forEach(number => {
@@ -531,16 +565,19 @@ function App() {
                 {newItemType === 'task' ? (
                   <>
                     <div>
-                      <label className="text-[11px] block mb-1">Номера задач (каждый с новой строки):</label>
+                      <label className="text-[11px] block mb-1">Номера задач (можно с подзадачами в скобках):</label>
                       <textarea
                         value={newItemNumbers}
                         onChange={(e) => setNewItemNumbers(e.target.value)}
                         className="win-input w-full"
-                        placeholder="1.2&#10;01.1&#10;01.2&#10;1.12&#10;1.3"
+                        placeholder="15.11(7, 9*, 10); 15.23(1); 15.32; 15.37(1, 2, 3)"
                         rows={6}
                         autoFocus
                         style={{ resize: 'vertical', minHeight: '80px' }}
                       />
+                      <div className="text-[9px] text-gray-600 mt-1">
+                        Разделители: ; или новая строка. Подзадачи в скобках.
+                      </div>
                     </div>
                     <div>
                       <label className="text-[11px] block mb-1">Описание (необязательно):</label>
