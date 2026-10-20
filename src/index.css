@@ -29,9 +29,14 @@ body {
   -webkit-font-smoothing: none;
   -moz-osx-font-smoothing: unset;
   image-rendering: pixelated;
-  overflow: hidden;
   cursor: default;
   user-select: none;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* Windows 98 3D border effects */
