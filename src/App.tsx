@@ -18,7 +18,7 @@ function App() {
   const [newSubjectShort, setNewSubjectShort] = useState('');
   const [showAddItem, setShowAddItem] = useState(false);
   const [newItemType, setNewItemType] = useState<'task' | 'deadline'>('task');
-  const [newItemNumber, setNewItemNumber] = useState('');
+  const [newItemNumbers, setNewItemNumbers] = useState('');
   const [newItemTitle, setNewItemTitle] = useState('');
   const [newItemDate, setNewItemDate] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string } | null>(null);
@@ -60,32 +60,38 @@ function App() {
   const handleAddItem = () => {
     if (!selectedSubject) return;
     
-    let newItem: ListItem;
+    const newItems: ListItem[] = [];
+    
     if (newItemType === 'task') {
-      if (!newItemNumber.trim() || !newItemTitle.trim()) return;
-      newItem = {
-        id: generateId(),
-        type: 'task',
-        number: newItemNumber.trim(),
-        title: newItemTitle.trim(),
-        done: false,
-      };
+      // Parse multiple numbers separated by newlines
+      const numbers = newItemNumbers.split('\n').map(n => n.trim()).filter(n => n.length > 0);
+      if (numbers.length === 0) return;
+      
+      numbers.forEach(number => {
+        newItems.push({
+          id: generateId(),
+          type: 'task',
+          number: number,
+          title: newItemTitle.trim() || '',
+          done: false,
+        });
+      });
     } else {
       if (!newItemTitle.trim() || !newItemDate) return;
-      newItem = {
+      newItems.push({
         id: generateId(),
         type: 'deadline',
         title: newItemTitle.trim(),
         date: newItemDate,
-      };
+      });
     }
 
     const updated = subjects.map(s =>
-      s.id === selectedSubjectId ? { ...s, items: [...s.items, newItem] } : s
+      s.id === selectedSubjectId ? { ...s, items: [...s.items, ...newItems] } : s
     );
     setSubjects(updated);
     setShowAddItem(false);
-    setNewItemNumber('');
+    setNewItemNumbers('');
     setNewItemTitle('');
     setNewItemDate('');
   };
@@ -323,13 +329,15 @@ function App() {
                             }`}
                             onClick={() => handleToggleTask(item.id)}
                           >
-                            <span className={`text-[11px] font-mono w-[60px] ${item.done ? 'line-through text-[#808080]' : ''}`}>
+                            <span className={`text-[11px] font-mono ${item.done ? 'line-through text-[#808080]' : ''}`}>
                               {item.number}
                             </span>
-                            <span className={`text-[11px] flex-1 ${item.done ? 'line-through text-[#808080]' : ''}`}>
-                              {item.title}
-                            </span>
-                            {item.done && <span className="text-[11px]">✅</span>}
+                            {item.title && (
+                              <span className={`text-[11px] flex-1 ${item.done ? 'line-through text-[#808080]' : ''}`}>
+                                {item.title}
+                              </span>
+                            )}
+                            {item.done && <span className="text-[11px] ml-auto">✅</span>}
                             <button
                               className="text-[10px] text-red-600 hover:text-red-800 px-1"
                               onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id); }}
@@ -523,25 +531,25 @@ function App() {
                 {newItemType === 'task' ? (
                   <>
                     <div>
-                      <label className="text-[11px] block mb-1">Номер задачи:</label>
-                      <input
-                        type="text"
-                        value={newItemNumber}
-                        onChange={(e) => setNewItemNumber(e.target.value)}
+                      <label className="text-[11px] block mb-1">Номера задач (каждый с новой строки):</label>
+                      <textarea
+                        value={newItemNumbers}
+                        onChange={(e) => setNewItemNumbers(e.target.value)}
                         className="win-input w-full"
-                        placeholder="1.2.102"
+                        placeholder="1.2&#10;01.1&#10;01.2&#10;1.12&#10;1.3"
+                        rows={6}
                         autoFocus
+                        style={{ resize: 'vertical', minHeight: '80px' }}
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] block mb-1">Описание:</label>
+                      <label className="text-[11px] block mb-1">Описание (необязательно):</label>
                       <input
                         type="text"
                         value={newItemTitle}
                         onChange={(e) => setNewItemTitle(e.target.value)}
                         className="win-input w-full"
-                        placeholder="Вычислить интеграл"
-                        onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
+                        placeholder="Домашняя работа"
                       />
                     </div>
                   </>
