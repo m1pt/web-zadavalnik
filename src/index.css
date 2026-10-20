@@ -154,6 +154,14 @@ body.dragging * {
   border: 2px solid;
   border-color: var(--win-lighter) var(--win-darker) var(--win-darker) var(--win-lighter);
   box-shadow: inset 1px 1px 0 var(--win-light), inset -1px -1px 0 var(--win-dark), 2px 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Floating window (for dialogs) */
+.win-window-floating {
+  background: var(--win-bg);
+  border: 2px solid;
+  border-color: var(--win-lighter) var(--win-darker) var(--win-darker) var(--win-lighter);
+  box-shadow: inset 1px 1px 0 var(--win-light), inset -1px -1px 0 var(--win-dark), 2px 2px 8px rgba(0,0,0,0.3);
   position: absolute;
 }
 

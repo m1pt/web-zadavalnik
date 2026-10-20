@@ -474,7 +474,7 @@ function App() {
       {/* Add Subject Dialog */}
       {showAddSubject && (
         <div className="fixed inset-0 flex items-center justify-center z-[99999]" style={{ background: 'rgba(0,0,0,0.3)' }}>
-          <div className="win-window" style={{ width: 350 }}>
+          <div className="win-window-floating" style={{ width: 350 }}>
             <div className="win-titlebar">
               <div className="flex items-center gap-1">
                 <span className="text-[11px]">➕</span>
@@ -532,7 +532,7 @@ function App() {
       {/* Add Task Dialog */}
       {showAddTask && (
         <div className="fixed inset-0 flex items-center justify-center z-[99999]" style={{ background: 'rgba(0,0,0,0.3)' }}>
-          <div className="win-window" style={{ width: 380 }}>
+          <div className="win-window-floating" style={{ width: 380 }}>
             <div className="win-titlebar">
               <div className="flex items-center gap-1">
                 <span className="text-[11px]">➕</span>
