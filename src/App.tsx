@@ -1,7 +1,20 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { problems, categories, Problem } from './data/problems';
 
-type Screen = 'home' | 'category' | 'problem' | 'results';
+type WindowId = 'home' | 'category' | 'problem' | 'results' | 'about' | 'help';
+
+interface WindowState {
+  id: WindowId;
+  title: string;
+  icon: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  minimized: boolean;
+  zIndex: number;
+  data?: any;
+}
 
 interface Stats {
   correct: number;
@@ -10,7 +23,15 @@ interface Stats {
 }
 
 function App() {
-  const [screen, setScreen] = useState<Screen>('home');
+  const [windows, setWindows] = useState<WindowState[]>([]);
+  const [activeWindowId, setActiveWindowId] = useState<WindowId | null>(null);
+  const [zCounter, setZCounter] = useState(100);
+  const [startMenuOpen, setStartMenuOpen] = useState(false);
+  const [selectedDesktopIcon, setSelectedDesktopIcon] = useState<string | null>(null);
+  const [time, setTime] = useState(new Date());
+  const [dragState, setDragState] = useState<{ windowId: WindowId; offsetX: number; offsetY: number } | null>(null);
+
+  // Problem state
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [currentProblemIndex, setCurrentProblemIndex] = useState(0);
   const [userAnswer, setUserAnswer] = useState('');
@@ -18,9 +39,111 @@ function App() {
   const [showHint, setShowHint] = useState(false);
   const [stats, setStats] = useState<Stats>({ correct: 0, wrong: 0, total: 0 });
   const [categoryStats, setCategoryStats] = useState<Record<string, Stats>>({});
-  const [animateCorrect, setAnimateCorrect] = useState(false);
-  const [animateWrong, setAnimateWrong] = useState(false);
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  const desktopRef = useRef<HTMLDivElement>(null);
+
+  // Clock
+  useEffect(() => {
+    const interval = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Focus input when problem opens
+  useEffect(() => {
+    if (activeWindowId === 'problem' && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [activeWindowId, currentProblemIndex, showResult]);
+
+  const bringToFront = useCallback((id: WindowId) => {
+    const newZ = zCounter + 1;
+    setZCounter(newZ);
+    setWindows(w => w.map(win => win.id === id ? { ...win, zIndex: newZ, minimized: false } : win));
+    setActiveWindowId(id);
+  }, [zCounter]);
+
+  const openWindow = useCallback((id: WindowId, title: string, icon: string, data?: any) => {
+    const existing = windows.find(w => w.id === id);
+    if (existing) {
+      bringToFront(id);
+      if (data) setWindows(w => w.map(win => win.id === id ? { ...win, data } : win));
+      return;
+    }
+
+    const newZ = zCounter + 1;
+    setZCounter(newZ);
+
+    const offsetX = (windows.length % 5) * 25;
+    const offsetY = (windows.length % 5) * 25;
+
+    let width = 500;
+    let height = 400;
+    if (id === 'about') { width = 400; height = 300; }
+    if (id === 'help') { width = 450; height = 350; }
+    if (id === 'problem') { width = 520; height = 450; }
+
+    const newWindow: WindowState = {
+      id,
+      title,
+      icon,
+      x: 80 + offsetX,
+      y: 40 + offsetY,
+      width,
+      height,
+      minimized: false,
+      zIndex: newZ,
+      data,
+    };
+
+    setWindows(w => [...w, newWindow]);
+    setActiveWindowId(id);
+  }, [windows, zCounter, bringToFront]);
+
+  const closeWindow = useCallback((id: WindowId) => {
+    setWindows(w => w.filter(win => win.id !== id));
+    if (activeWindowId === id) {
+      const remaining = windows.filter(w => w.id !== id);
+      setActiveWindowId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
+    }
+  }, [activeWindowId, windows]);
+
+  const minimizeWindow = useCallback((id: WindowId) => {
+    setWindows(w => w.map(win => win.id === id ? { ...win, minimized: true } : win));
+    const visible = windows.filter(w => !w.minimized && w.id !== id);
+    setActiveWindowId(visible.length > 0 ? visible[visible.length - 1].id : null);
+  }, [windows]);
+
+  // Drag handling
+  const handleMouseDown = (e: React.MouseEvent, windowId: WindowId) => {
+    const win = windows.find(w => w.id === windowId);
+    if (!win) return;
+    bringToFront(windowId);
+    setDragState({ windowId, offsetX: e.clientX - win.x, offsetY: e.clientY - win.y });
+  };
+
+  useEffect(() => {
+    if (!dragState) return;
+
+    const handleMove = (e: MouseEvent) => {
+      setWindows(w => w.map(win =>
+        win.id === dragState.windowId
+          ? { ...win, x: Math.max(0, e.clientX - dragState.offsetX), y: Math.max(0, e.clientY - dragState.offsetY) }
+          : win
+      ));
+    };
+
+    const handleUp = () => setDragState(null);
+
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+    };
+  }, [dragState]);
+
+  // Problem logic
   const getCategoryProblems = useCallback(
     () => problems.filter((p) => p.category === selectedCategory),
     [selectedCategory]
@@ -28,31 +151,34 @@ function App() {
 
   const currentProblem: Problem | undefined = getCategoryProblems()[currentProblemIndex];
 
-  const handleCategorySelect = (categoryId: string) => {
+  const openCategory = (categoryId: string) => {
+    const cat = categories.find(c => c.id === categoryId);
     setSelectedCategory(categoryId);
     setCurrentProblemIndex(0);
     setUserAnswer('');
     setShowResult(false);
     setShowHint(false);
-    setScreen('category');
+    openWindow('category', `${cat?.name} — Задавальник`, cat?.icon || '📁');
+  };
+
+  const openProblem = (idx: number) => {
+    setCurrentProblemIndex(idx);
+    setUserAnswer('');
+    setShowResult(false);
+    setShowHint(false);
+    const cat = categories.find(c => c.id === selectedCategory);
+    openWindow('problem', `Задача ${idx + 1} — ${cat?.name}`, '📝');
   };
 
   const handleCheckAnswer = () => {
     if (!currentProblem || !userAnswer.trim()) return;
-
-    const isCorrect =
-      userAnswer.trim().toLowerCase() === currentProblem.answer.toLowerCase();
-
+    const isCorrect = userAnswer.trim().toLowerCase() === currentProblem.answer.toLowerCase();
     setShowResult(true);
     setShowHint(false);
 
     if (isCorrect) {
-      setAnimateCorrect(true);
-      setTimeout(() => setAnimateCorrect(false), 600);
       setStats((s) => ({ ...s, correct: s.correct + 1, total: s.total + 1 }));
     } else {
-      setAnimateWrong(true);
-      setTimeout(() => setAnimateWrong(false), 600);
       setStats((s) => ({ ...s, wrong: s.wrong + 1, total: s.total + 1 }));
     }
 
@@ -72,378 +198,466 @@ function App() {
   const handleNext = () => {
     const catProblems = getCategoryProblems();
     if (currentProblemIndex < catProblems.length - 1) {
-      setCurrentProblemIndex(currentProblemIndex + 1);
-      setUserAnswer('');
-      setShowResult(false);
-      setShowHint(false);
+      openProblem(currentProblemIndex + 1);
     } else {
-      setScreen('results');
+      const cat = categories.find(c => c.id === selectedCategory);
+      openWindow('results', 'Результаты', '📊');
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      if (showResult) {
-        handleNext();
-      } else {
-        handleCheckAnswer();
-      }
+      if (showResult) handleNext();
+      else handleCheckAnswer();
     }
   };
 
   const getDifficultyLabel = (d: string) => {
     switch (d) {
-      case 'easy': return { text: 'Легко', color: 'bg-green-100 text-green-700' };
-      case 'medium': return { text: 'Средне', color: 'bg-yellow-100 text-yellow-700' };
-      case 'hard': return { text: 'Сложно', color: 'bg-red-100 text-red-700' };
-      default: return { text: '', color: '' };
+      case 'easy': return '🟢 Легко';
+      case 'medium': return '🟡 Средне';
+      case 'hard': return '🔴 Сложно';
+      default: return '';
     }
   };
 
   const getCategoryInfo = (id: string) => categories.find((c) => c.id === id);
 
-  // HOME SCREEN
-  if (screen === 'home') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
-        {/* Header */}
-        <header className="pt-12 pb-8 text-center px-4">
-          <div className="text-6xl mb-4 animate-bounce">📚</div>
-          <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-yellow-200 via-pink-200 to-purple-200 bg-clip-text text-transparent">
-            Задавальник
-          </h1>
-          <p className="mt-3 text-lg text-purple-200 max-w-md mx-auto">
-            Интерактивный задачник для тренировки ума. Выберите категорию и решайте задачи!
-          </p>
-          {/* Stats bar */}
-          {stats.total > 0 && (
-            <div className="mt-6 inline-flex items-center gap-4 bg-white/10 backdrop-blur-sm rounded-full px-6 py-3">
-              <span className="text-green-400">✓ {stats.correct}</span>
-              <span className="text-red-400">✗ {stats.wrong}</span>
-              <span className="text-purple-200">Всего: {stats.total}</span>
+  // Render window content
+  const renderWindowContent = (win: WindowState) => {
+    switch (win.id) {
+      case 'category': {
+        const catInfo = getCategoryInfo(selectedCategory);
+        const catProblems = getCategoryProblems();
+        const catStat = categoryStats[selectedCategory];
+        return (
+          <div className="flex flex-col h-full">
+            {/* Menu bar */}
+            <div className="flex gap-0 border-b border-[#808080] bg-[#c0c0c0] px-1">
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Файл</span>
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Вид</span>
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Справка</span>
             </div>
-          )}
-        </header>
-
-        {/* Categories */}
-        <main className="max-w-4xl mx-auto px-4 pb-12">
-          <h2 className="text-xl font-semibold mb-6 text-center text-purple-200">
-            Выберите категорию
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {categories.map((cat) => {
-              const catProblems = problems.filter((p) => p.category === cat.id);
-              const catStat = categoryStats[cat.id];
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => handleCategorySelect(cat.id)}
-                  className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${cat.color} p-6 text-left shadow-lg hover:shadow-2xl transform hover:scale-105 transition-all duration-300`}
-                >
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -translate-y-8 translate-x-8 group-hover:scale-150 transition-transform duration-500"></div>
-                  <div className="text-4xl mb-3">{cat.icon}</div>
-                  <h3 className="text-xl font-bold">{cat.name}</h3>
-                  <p className="text-sm text-white/70 mt-1">{catProblems.length} задач</p>
-                  {catStat && catStat.total > 0 && (
-                    <div className="mt-3 text-xs bg-white/20 rounded-full px-3 py-1 inline-block">
-                      Решено: {catStat.correct}/{catStat.total}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Info section */}
-          <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-5 border border-white/10">
-              <div className="text-3xl mb-2">🎯</div>
-              <h3 className="font-semibold mb-1">25 задач</h3>
-              <p className="text-sm text-purple-200">Разнообразные задачи по математике и логике</p>
+            {/* Toolbar */}
+            <div className="flex items-center gap-1 px-2 py-1 border-b border-[#808080]">
+              <button className="win-btn" onClick={() => closeWindow('category')}>
+                ← Назад
+              </button>
+              <div className="w-px h-5 bg-[#808080] mx-1"></div>
+              <span className="text-[11px]">{catInfo?.icon} {catInfo?.name} — {catProblems.length} задач</span>
             </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-5 border border-white/10">
-              <div className="text-3xl mb-2">💡</div>
-              <h3 className="font-semibold mb-1">Подсказки</h3>
-              <p className="text-sm text-purple-200">Если застряли — используйте подсказку</p>
-            </div>
-            <div className="bg-white/5 backdrop-blur-sm rounded-xl p-5 border border-white/10">
-              <div className="text-3xl mb-2">📊</div>
-              <h3 className="font-semibold mb-1">Прогресс</h3>
-              <p className="text-sm text-purple-200">Отслеживайте свои результаты</p>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // CATEGORY SCREEN
-  if (screen === 'category') {
-    const catInfo = getCategoryInfo(selectedCategory);
-    const catProblems = getCategoryProblems();
-    const catStat = categoryStats[selectedCategory];
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
-        <header className="pt-8 pb-6 px-4">
-          <button
-            onClick={() => setScreen('home')}
-            className="mb-6 flex items-center gap-2 text-purple-300 hover:text-white transition-colors"
-          >
-            <span>←</span> Назад к категориям
-          </button>
-          <div className="flex items-center gap-4">
-            <span className="text-5xl">{catInfo?.icon}</span>
-            <div>
-              <h1 className="text-3xl font-bold">{catInfo?.name}</h1>
-              <p className="text-purple-200">{catProblems.length} задач</p>
-            </div>
-          </div>
-          {catStat && catStat.total > 0 && (
-            <div className="mt-4 flex items-center gap-4">
-              <div className="flex-1 bg-white/10 rounded-full h-3 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-green-400 to-green-600 rounded-full transition-all duration-500"
-                  style={{ width: `${(catStat.correct / catProblems.length) * 100}%` }}
-                ></div>
-              </div>
-              <span className="text-sm text-purple-200">
-                {catStat.correct}/{catProblems.length}
-              </span>
-            </div>
-          )}
-        </header>
-
-        <main className="max-w-4xl mx-auto px-4 pb-12">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {catProblems.map((problem, idx) => {
-              const diff = getDifficultyLabel(problem.difficulty);
-              return (
-                <button
-                  key={problem.id}
-                  onClick={() => {
-                    setCurrentProblemIndex(idx);
-                    setUserAnswer('');
-                    setShowResult(false);
-                    setShowHint(false);
-                    setScreen('problem');
-                  }}
-                  className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-5 text-left hover:bg-white/10 transition-all duration-200 hover:scale-[1.02]"
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <span className="text-sm text-purple-300">Задача {idx + 1}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${diff.color}`}>
-                      {diff.text}
-                    </span>
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-3 bg-white m-[2px] win-border-inset">
+              {catStat && catStat.total > 0 && (
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="text-[11px]">Прогресс:</span>
+                  <div className="win-progress flex-1 max-w-[200px]">
+                    <div className="win-progress-fill" style={{ width: `${(catStat.correct / catProblems.length) * 100}%` }}></div>
                   </div>
-                  <p className="text-white/90 line-clamp-2">{problem.question}</p>
-                </button>
-              );
-            })}
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // RESULTS SCREEN
-  if (screen === 'results') {
-    const catInfo = getCategoryInfo(selectedCategory);
-    const catStat = categoryStats[selectedCategory] || { correct: 0, wrong: 0, total: 0 };
-    const catProblems = getCategoryProblems();
-    const percentage = catProblems.length > 0 ? Math.round((catStat.correct / catProblems.length) * 100) : 0;
-
-    let emoji = '😢';
-    let message = 'Не расстраивайтесь! Попробуйте ещё раз.';
-    if (percentage >= 80) { emoji = '🏆'; message = 'Отличный результат! Вы мастер!'; }
-    else if (percentage >= 60) { emoji = '😊'; message = 'Хороший результат! Продолжайте!'; }
-    else if (percentage >= 40) { emoji = '🤔'; message = 'Неплохо, но можно лучше!'; }
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white flex items-center justify-center px-4">
-        <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 max-w-md w-full text-center border border-white/20">
-          <div className="text-7xl mb-4">{emoji}</div>
-          <h2 className="text-2xl font-bold mb-2">Результаты</h2>
-          <p className="text-purple-200 mb-6">{catInfo?.name}</p>
-
-          <div className="bg-white/5 rounded-2xl p-6 mb-6">
-            <div className="text-5xl font-bold mb-2">{percentage}%</div>
-            <div className="flex justify-center gap-6 text-sm">
-              <span className="text-green-400">✓ Верно: {catStat.correct}</span>
-              <span className="text-red-400">✗ Неверно: {catStat.wrong}</span>
+                  <span className="text-[11px]">{catStat.correct}/{catProblems.length}</span>
+                </div>
+              )}
+              <div className="grid grid-cols-1 gap-1">
+                {catProblems.map((problem, idx) => (
+                  <button
+                    key={problem.id}
+                    onClick={() => openProblem(idx)}
+                    className="flex items-center gap-2 p-2 text-left hover:bg-[#000080] hover:text-white text-[11px] border border-transparent hover:border-[#000080]"
+                  >
+                    <span className="text-[14px]">📄</span>
+                    <span className="flex-1 truncate">Задача {idx + 1}: {problem.question}</span>
+                    <span className="text-[10px] opacity-70">{getDifficultyLabel(problem.difficulty)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* Status bar */}
+            <div className="win-statusbar">
+              <div className="win-statusbar-section">{catProblems.length} объектов</div>
             </div>
           </div>
+        );
+      }
 
-          <p className="text-purple-200 mb-8">{message}</p>
+      case 'problem': {
+        if (!currentProblem) return <div className="p-4">Задача не найдена</div>;
+        const diff = getDifficultyLabel(currentProblem.difficulty);
+        const isCorrect = userAnswer.trim().toLowerCase() === currentProblem.answer.toLowerCase();
+        const catProblems = getCategoryProblems();
 
-          <div className="flex flex-col gap-3">
-            <button
-              onClick={() => {
-                setCurrentProblemIndex(0);
-                setUserAnswer('');
-                setShowResult(false);
-                setShowHint(false);
-                setScreen('category');
-              }}
-              className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl py-3 px-6 font-semibold transition-all duration-200 hover:scale-105"
-            >
-              Попробовать снова
-            </button>
-            <button
-              onClick={() => setScreen('home')}
-              className="bg-white/10 hover:bg-white/20 rounded-xl py-3 px-6 font-semibold transition-all duration-200"
-            >
-              К категориям
-            </button>
+        return (
+          <div className="flex flex-col h-full">
+            {/* Menu bar */}
+            <div className="flex gap-0 border-b border-[#808080] bg-[#c0c0c0] px-1">
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Файл</span>
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer" onClick={() => setShowHint(true)}>Подсказка</span>
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Справка</span>
+            </div>
+            {/* Content */}
+            <div className="flex-1 overflow-auto p-4">
+              {/* Progress */}
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-[11px]">Задача {currentProblemIndex + 1} из {catProblems.length}</span>
+                <div className="win-progress flex-1 max-w-[200px]">
+                  <div className="win-progress-fill" style={{ width: `${((currentProblemIndex + 1) / catProblems.length) * 100}%` }}></div>
+                </div>
+                <span className="text-[11px]">{diff}</span>
+              </div>
+
+              {/* Question */}
+              <div className="win-groupbox mb-4">
+                <span className="win-groupbox-label">Условие задачи</span>
+                <p className="text-[12px] leading-relaxed">{currentProblem.question}</p>
+              </div>
+
+              {/* Hint */}
+              {showHint && currentProblem.hint && (
+                <div className="win-border-inset bg-[#ffffcc] p-2 mb-4">
+                  <div className="flex items-start gap-2">
+                    <span>💡</span>
+                    <p className="text-[11px]"><b>Подсказка:</b> {currentProblem.hint}</p>
+                  </div>
+                </div>
+              )}
+
+              {!showResult ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <label className="text-[11px]">Ответ:</label>
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={userAnswer}
+                      onChange={(e) => setUserAnswer(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      className="win-input flex-1"
+                      placeholder="Введите ответ..."
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="win-btn" onClick={handleCheckAnswer} disabled={!userAnswer.trim()}>
+                      ✓ Проверить
+                    </button>
+                    {currentProblem.hint && !showHint && (
+                      <button className="win-btn" onClick={() => setShowHint(true)}>
+                        💡 Подсказка
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className={`win-border-inset p-3 ${isCorrect ? 'bg-[#c0ffc0]' : 'bg-[#ffc0c0]'}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span>{isCorrect ? '✅' : '❌'}</span>
+                      <b className="text-[12px]">{isCorrect ? 'Правильно!' : 'Неправильно'}</b>
+                    </div>
+                    {!isCorrect && (
+                      <p className="text-[11px]">Правильный ответ: <b>{currentProblem.answer}</b></p>
+                    )}
+                  </div>
+                  <div className="win-border-inset bg-[#c0e0ff] p-3">
+                    <div className="flex items-start gap-2">
+                      <span>📖</span>
+                      <div>
+                        <p className="text-[11px] font-bold mb-1">Решение:</p>
+                        <p className="text-[11px]">{currentProblem.explanation}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <button className="win-btn" onClick={handleNext}>
+                    {currentProblemIndex < catProblems.length - 1 ? 'Далее →' : 'Результаты'}
+                  </button>
+                </div>
+              )}
+            </div>
+            {/* Status bar */}
+            <div className="win-statusbar">
+              <div className="win-statusbar-section">
+                {stats.correct} верно | {stats.wrong} неверно
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-    );
-  }
+        );
+      }
 
-  // PROBLEM SCREEN
-  if (!currentProblem) return null;
-  const catInfo = getCategoryInfo(selectedCategory);
-  const diff = getDifficultyLabel(currentProblem.difficulty);
-  const isCorrect = userAnswer.trim().toLowerCase() === currentProblem.answer.toLowerCase();
-  const catProblems = getCategoryProblems();
+      case 'results': {
+        const catInfo = getCategoryInfo(selectedCategory);
+        const catStat = categoryStats[selectedCategory] || { correct: 0, wrong: 0, total: 0 };
+        const catProblems = getCategoryProblems();
+        const percentage = catProblems.length > 0 ? Math.round((catStat.correct / catProblems.length) * 100) : 0;
+
+        let emoji = '😢';
+        let message = 'Не расстраивайтесь! Попробуйте ещё раз.';
+        if (percentage >= 80) { emoji = '🏆'; message = 'Отличный результат! Вы мастер!'; }
+        else if (percentage >= 60) { emoji = '😊'; message = 'Хороший результат!'; }
+        else if (percentage >= 40) { emoji = '🤔'; message = 'Неплохо, но можно лучше!'; }
+
+        return (
+          <div className="flex flex-col h-full">
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+              <div className="text-5xl mb-4">{emoji}</div>
+              <h2 className="text-[14px] font-bold mb-2">Результаты — {catInfo?.name}</h2>
+              <div className="win-border-inset bg-white p-4 mb-4 w-full max-w-[250px]">
+                <div className="text-[24px] font-bold mb-2">{percentage}%</div>
+                <div className="win-progress mb-2">
+                  <div className="win-progress-fill" style={{ width: `${percentage}%` }}></div>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-green-700">✓ Верно: {catStat.correct}</span>
+                  <span className="text-red-700">✗ Неверно: {catStat.wrong}</span>
+                </div>
+              </div>
+              <p className="text-[11px] mb-4">{message}</p>
+              <div className="flex gap-2">
+                <button className="win-btn" onClick={() => {
+                  closeWindow('results');
+                  setCurrentProblemIndex(0);
+                  setUserAnswer('');
+                  setShowResult(false);
+                }}>
+                  Заново
+                </button>
+                <button className="win-btn" onClick={() => closeWindow('results')}>
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 'about':
+        return (
+          <div className="flex flex-col h-full">
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+              <div className="text-4xl mb-3">📚</div>
+              <h2 className="text-[14px] font-bold mb-1">Задавальник</h2>
+              <p className="text-[11px] mb-1">Версия 1.0</p>
+              <p className="text-[11px] mb-4">Интерактивный задачник</p>
+              <div className="win-border-inset bg-white p-3 w-full text-[11px] text-left mb-4">
+                <p>25 задач по 5 категориям:</p>
+                <ul className="ml-4 mt-1">
+                  <li>🔢 Арифметика</li>
+                  <li>📐 Алгебра</li>
+                  <li>🧠 Логика</li>
+                  <li>📏 Геометрия</li>
+                  <li>📝 Текстовые задачи</li>
+                </ul>
+              </div>
+              <button className="win-btn" onClick={() => closeWindow('about')}>OK</button>
+            </div>
+          </div>
+        );
+
+      case 'help':
+        return (
+          <div className="flex flex-col h-full">
+            <div className="flex gap-0 border-b border-[#808080] bg-[#c0c0c0] px-1">
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Содержание</span>
+              <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Индекс</span>
+            </div>
+            <div className="flex-1 overflow-auto p-4 bg-white m-[2px] win-border-inset">
+              <h3 className="text-[12px] font-bold mb-2">📚 Как пользоваться Задавальником</h3>
+              <div className="text-[11px] space-y-2">
+                <p><b>1.</b> Дважды щёлкните на иконке категории на рабочем столе.</p>
+                <p><b>2.</b> Выберите задачу из списка.</p>
+                <p><b>3.</b> Введите ответ и нажмите «Проверить» или Enter.</p>
+                <p><b>4.</b> Если затрудняетесь — нажмите «Подсказка» 💡</p>
+                <p><b>5.</b> После ответа можно посмотреть решение.</p>
+                <p><b>6.</b> Прогресс отображается в панели задач и в окне категории.</p>
+              </div>
+              <div className="mt-4 pt-3 border-t border-[#c0c0c0]">
+                <p className="text-[11px] text-[#808080]">© 2024 Задавальник. Все права защищены.</p>
+              </div>
+            </div>
+            <div className="flex justify-end p-2 gap-2">
+              <button className="win-btn" onClick={() => closeWindow('help')}>OK</button>
+            </div>
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
-      {/* Top bar */}
-      <header className="pt-6 pb-4 px-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <button
-            onClick={() => setScreen('category')}
-            className="flex items-center gap-2 text-purple-300 hover:text-white transition-colors"
+    <div
+      className="h-screen w-screen overflow-hidden relative"
+      style={{ background: '#008080' }}
+      onClick={() => { setStartMenuOpen(false); setSelectedDesktopIcon(null); }}
+      ref={desktopRef}
+    >
+      {/* Desktop icons */}
+      <div className="absolute top-3 left-3 flex flex-col gap-2 flex-wrap" style={{ maxHeight: 'calc(100vh - 50px)' }}>
+        {categories.map((cat) => (
+          <div
+            key={cat.id}
+            className={`win-desktop-icon ${selectedDesktopIcon === cat.id ? 'selected' : ''}`}
+            onClick={(e) => { e.stopPropagation(); setSelectedDesktopIcon(cat.id); }}
+            onDoubleClick={(e) => { e.stopPropagation(); openCategory(cat.id); }}
           >
-            <span>←</span> <span className="hidden sm:inline">Назад</span>
-          </button>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">{catInfo?.icon}</span>
-            <span className="text-sm text-purple-200">{catInfo?.name}</span>
+            <div className="icon-img flex items-center justify-center text-[28px]">
+              {cat.icon}
+            </div>
+            <span className="icon-label">{cat.name}</span>
           </div>
-          <span className="text-sm text-purple-300">
-            {currentProblemIndex + 1}/{catProblems.length}
+        ))}
+        <div
+          className={`win-desktop-icon ${selectedDesktopIcon === 'about' ? 'selected' : ''}`}
+          onClick={(e) => { e.stopPropagation(); setSelectedDesktopIcon('about'); }}
+          onDoubleClick={(e) => { e.stopPropagation(); openWindow('about', 'О программе', 'ℹ️'); }}
+        >
+          <div className="icon-img flex items-center justify-center text-[28px]">ℹ️</div>
+          <span className="icon-label">О программе</span>
+        </div>
+        <div
+          className={`win-desktop-icon ${selectedDesktopIcon === 'help' ? 'selected' : ''}`}
+          onClick={(e) => { e.stopPropagation(); setSelectedDesktopIcon('help'); }}
+          onDoubleClick={(e) => { e.stopPropagation(); openWindow('help', 'Справка', '❓'); }}
+        >
+          <div className="icon-img flex items-center justify-center text-[28px]">❓</div>
+          <span className="icon-label">Справка</span>
+        </div>
+      </div>
+
+      {/* Windows */}
+      {windows.map((win) => {
+        if (win.minimized) return null;
+        const isActive = activeWindowId === win.id;
+        return (
+          <div
+            key={win.id}
+            className="win-window win-window-animate"
+            style={{
+              left: win.x,
+              top: win.y,
+              width: win.width,
+              height: win.height,
+              zIndex: win.zIndex,
+            }}
+            onClick={(e) => { e.stopPropagation(); bringToFront(win.id); }}
+          >
+            {/* Title bar */}
+            <div
+              className={`win-titlebar ${!isActive ? 'inactive' : ''}`}
+              onMouseDown={(e) => handleMouseDown(e, win.id)}
+            >
+              <div className="flex items-center gap-1 overflow-hidden">
+                <span className="text-[11px]">{win.icon}</span>
+                <span className="truncate">{win.title}</span>
+              </div>
+              <div className="flex gap-[2px]">
+                <button
+                  className="win-titlebar-btn"
+                  onClick={(e) => { e.stopPropagation(); minimizeWindow(win.id); }}
+                  title="Свернуть"
+                >
+                  <span className="mt-[2px]">_</span>
+                </button>
+                <button
+                  className="win-titlebar-btn"
+                  onClick={(e) => { e.stopPropagation(); closeWindow(win.id); }}
+                  title="Закрыть"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            {/* Content */}
+            <div className="flex-1 overflow-hidden" style={{ height: 'calc(100% - 20px)' }}>
+              {renderWindowContent(win)}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Start menu */}
+      {startMenuOpen && (
+        <div
+          className="win-menu"
+          style={{ bottom: 30, left: 2 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex">
+            {/* Side banner */}
+            <div className="w-[24px] bg-gradient-to-b from-[#000080] to-[#1084d0] flex items-end justify-center pb-2">
+              <span className="text-white text-[10px] font-bold writing-mode-vertical transform -rotate-0" style={{ writingMode: 'vertical-rl' }}>
+                Задавальник98
+              </span>
+            </div>
+            {/* Menu items */}
+            <div className="flex-1 py-1">
+              {categories.map((cat) => (
+                <div
+                  key={cat.id}
+                  className="win-menu-item"
+                  onClick={() => { setStartMenuOpen(false); openCategory(cat.id); }}
+                >
+                  <span>{cat.icon}</span>
+                  <span>{cat.name}</span>
+                </div>
+              ))}
+              <div className="win-menu-separator"></div>
+              <div
+                className="win-menu-item"
+                onClick={() => { setStartMenuOpen(false); openWindow('help', 'Справка', '❓'); }}
+              >
+                <span>❓</span>
+                <span>Справка</span>
+              </div>
+              <div
+                className="win-menu-item"
+                onClick={() => { setStartMenuOpen(false); openWindow('about', 'О программе', 'ℹ️'); }}
+              >
+                <span>ℹ️</span>
+                <span>О программе</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Taskbar */}
+      <div className="win-taskbar" onClick={(e) => e.stopPropagation()}>
+        <button
+          className={`win-start-btn ${startMenuOpen ? 'active' : ''}`}
+          onClick={() => setStartMenuOpen(!startMenuOpen)}
+        >
+          <span className="text-[14px]">🪟</span>
+          <span>Пуск</span>
+        </button>
+
+        <div className="w-px h-6 bg-[#808080] mx-1"></div>
+
+        {/* Window buttons */}
+        <div className="flex-1 flex items-center gap-1 overflow-hidden">
+          {windows.map((win) => (
+            <button
+              key={win.id}
+              className={`win-taskbar-item ${activeWindowId === win.id && !win.minimized ? 'active' : ''}`}
+              onClick={() => {
+                if (win.minimized || activeWindowId !== win.id) {
+                  bringToFront(win.id);
+                } else {
+                  minimizeWindow(win.id);
+                }
+              }}
+            >
+              <span className="text-[11px]">{win.icon}</span>
+              <span className="truncate">{win.title}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Clock */}
+        <div className="win-clock">
+          <span className="text-[11px]">
+            {time.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
-        {/* Progress bar */}
-        <div className="max-w-2xl mx-auto mt-3">
-          <div className="bg-white/10 rounded-full h-2 overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-purple-400 to-pink-400 rounded-full transition-all duration-500"
-              style={{ width: `${((currentProblemIndex + 1) / catProblems.length) * 100}%` }}
-            ></div>
-          </div>
-        </div>
-      </header>
-
-      {/* Problem card */}
-      <main className="max-w-2xl mx-auto px-4 pb-12 pt-4">
-        <div
-          className={`bg-white/10 backdrop-blur-md rounded-3xl p-6 md:p-8 border border-white/20 transition-all duration-300 ${
-            animateCorrect ? 'ring-4 ring-green-400 scale-[1.02]' : ''
-          } ${animateWrong ? 'ring-4 ring-red-400 animate-shake' : ''}`}
-        >
-          {/* Difficulty badge */}
-          <div className="flex items-center justify-between mb-6">
-            <span className="text-sm text-purple-300">Задача {currentProblemIndex + 1}</span>
-            <span className={`text-xs px-3 py-1 rounded-full ${diff.color}`}>{diff.text}</span>
-          </div>
-
-          {/* Question */}
-          <h2 className="text-xl md:text-2xl font-semibold mb-6 leading-relaxed">
-            {currentProblem.question}
-          </h2>
-
-          {/* Hint */}
-          {showHint && currentProblem.hint && (
-            <div className="mb-6 bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4">
-              <div className="flex items-start gap-2">
-                <span className="text-xl">💡</span>
-                <p className="text-yellow-200 text-sm">{currentProblem.hint}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Answer input */}
-          {!showResult && (
-            <div className="space-y-4">
-              <input
-                type="text"
-                value={userAnswer}
-                onChange={(e) => setUserAnswer(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Введите ответ..."
-                className="w-full bg-white/5 border border-white/20 rounded-xl px-5 py-4 text-lg text-white placeholder-purple-300/50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all"
-                autoFocus
-              />
-              <div className="flex gap-3">
-                <button
-                  onClick={handleCheckAnswer}
-                  disabled={!userAnswer.trim()}
-                  className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl py-3 px-6 font-semibold transition-all duration-200 hover:scale-[1.02] disabled:hover:scale-100"
-                >
-                  Проверить
-                </button>
-                {currentProblem.hint && (
-                  <button
-                    onClick={() => setShowHint(true)}
-                    className="bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/30 rounded-xl py-3 px-5 transition-all duration-200"
-                    title="Подсказка"
-                  >
-                    💡
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Result */}
-          {showResult && (
-            <div className="space-y-4">
-              <div
-                className={`rounded-xl p-5 ${
-                  isCorrect
-                    ? 'bg-green-500/10 border border-green-500/30'
-                    : 'bg-red-500/10 border border-red-500/30'
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="text-2xl">{isCorrect ? '✅' : '❌'}</span>
-                  <span className={`font-bold text-lg ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
-                    {isCorrect ? 'Правильно!' : 'Неправильно'}
-                  </span>
-                </div>
-                {!isCorrect && (
-                  <p className="text-white/80">
-                    Правильный ответ: <span className="font-bold text-green-400">{currentProblem.answer}</span>
-                  </p>
-                )}
-              </div>
-
-              {/* Explanation */}
-              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-5">
-                <div className="flex items-start gap-2">
-                  <span className="text-xl">📖</span>
-                  <div>
-                    <p className="text-sm text-blue-300 font-semibold mb-1">Решение:</p>
-                    <p className="text-white/80 text-sm">{currentProblem.explanation}</p>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={handleNext}
-                onKeyDown={handleKeyDown}
-                className="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 rounded-xl py-3 px-6 font-semibold transition-all duration-200 hover:scale-[1.02]"
-              >
-                {currentProblemIndex < catProblems.length - 1 ? 'Следующая задача →' : 'Показать результаты'}
-              </button>
-            </div>
-          )}
-        </div>
-      </main>
+      </div>
     </div>
   );
 }
