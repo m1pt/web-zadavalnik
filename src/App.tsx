@@ -1,26 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Subject,
-  Task,
+  ListItem,
   FileItem,
   loadSubjects,
   saveSubjects,
   generateId,
   formatFileSize,
   getFileIcon,
+  formatDate,
 } from './data/store';
 
 function App() {
   const [subjects, setSubjects] = useState<Subject[]>(() => loadSubjects());
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>(subjects[0]?.id || '');
   const [showAddSubject, setShowAddSubject] = useState(false);
-  const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectShort, setNewSubjectShort] = useState('');
-  const [newSubjectIcon, setNewSubjectIcon] = useState('📚');
-  const [showAddTask, setShowAddTask] = useState(false);
-  const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newTaskWeek, setNewTaskWeek] = useState(1);
-  const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set([1, 2, 3]));
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [newItemType, setNewItemType] = useState<'task' | 'deadline'>('task');
+  const [newItemNumber, setNewItemNumber] = useState('');
+  const [newItemTitle, setNewItemTitle] = useState('');
+  const [newItemDate, setNewItemDate] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; fileId: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -33,21 +33,17 @@ function App() {
 
   // Add subject
   const handleAddSubject = () => {
-    if (!newSubjectName.trim()) return;
+    if (!newSubjectShort.trim()) return;
     const newSubject: Subject = {
       id: generateId(),
-      name: newSubjectName.trim(),
-      shortName: newSubjectShort.trim() || newSubjectName.trim().substring(0, 6),
-      icon: newSubjectIcon || '📚',
-      tasks: [],
+      shortName: newSubjectShort.trim(),
+      items: [],
       files: [],
     };
     setSubjects([...subjects, newSubject]);
     setSelectedSubjectId(newSubject.id);
     setShowAddSubject(false);
-    setNewSubjectName('');
     setNewSubjectShort('');
-    setNewSubjectIcon('📚');
   };
 
   // Delete subject
@@ -60,39 +56,60 @@ function App() {
     }
   };
 
-  // Add task
-  const handleAddTask = () => {
-    if (!newTaskTitle.trim() || !selectedSubject) return;
-    const newTask: Task = {
-      id: generateId(),
-      title: newTaskTitle.trim(),
-      week: newTaskWeek,
-      done: false,
-    };
+  // Add item (task or deadline)
+  const handleAddItem = () => {
+    if (!selectedSubject) return;
+    
+    let newItem: ListItem;
+    if (newItemType === 'task') {
+      if (!newItemNumber.trim() || !newItemTitle.trim()) return;
+      newItem = {
+        id: generateId(),
+        type: 'task',
+        number: newItemNumber.trim(),
+        title: newItemTitle.trim(),
+        done: false,
+      };
+    } else {
+      if (!newItemTitle.trim() || !newItemDate) return;
+      newItem = {
+        id: generateId(),
+        type: 'deadline',
+        title: newItemTitle.trim(),
+        date: newItemDate,
+      };
+    }
+
     const updated = subjects.map(s =>
-      s.id === selectedSubjectId ? { ...s, tasks: [...s.tasks, newTask] } : s
+      s.id === selectedSubjectId ? { ...s, items: [...s.items, newItem] } : s
     );
     setSubjects(updated);
-    setNewTaskTitle('');
-    setShowAddTask(false);
-    setExpandedWeeks(prev => new Set(prev).add(newTaskWeek));
+    setShowAddItem(false);
+    setNewItemNumber('');
+    setNewItemTitle('');
+    setNewItemDate('');
   };
 
   // Toggle task
-  const handleToggleTask = (taskId: string) => {
+  const handleToggleTask = (itemId: string) => {
     const updated = subjects.map(s =>
       s.id === selectedSubjectId
-        ? { ...s, tasks: s.tasks.map(t => t.id === taskId ? { ...t, done: !t.done } : t) }
+        ? {
+            ...s,
+            items: s.items.map(item =>
+              item.id === itemId && item.type === 'task' ? { ...item, done: !item.done } : item
+            ),
+          }
         : s
     );
     setSubjects(updated);
   };
 
-  // Delete task
-  const handleDeleteTask = (taskId: string) => {
+  // Delete item
+  const handleDeleteItem = (itemId: string) => {
     const updated = subjects.map(s =>
       s.id === selectedSubjectId
-        ? { ...s, tasks: s.tasks.filter(t => t.id !== taskId) }
+        ? { ...s, items: s.items.filter(item => item.id !== itemId) }
         : s
     );
     setSubjects(updated);
@@ -153,30 +170,9 @@ function App() {
     setContextMenu(null);
   };
 
-  // Toggle week
-  const toggleWeek = (week: number) => {
-    setExpandedWeeks(prev => {
-      const next = new Set(prev);
-      if (next.has(week)) next.delete(week);
-      else next.add(week);
-      return next;
-    });
-  };
-
-  // Group tasks by week
-  const tasksByWeek = selectedSubject
-    ? selectedSubject.tasks.reduce((acc, task) => {
-        if (!acc[task.week]) acc[task.week] = [];
-        acc[task.week].push(task);
-        return acc;
-      }, {} as Record<number, Task[]>)
-    : {};
-
-  const sortedWeeks = Object.keys(tasksByWeek).map(Number).sort((a, b) => a - b);
-
   // Stats
-  const totalTasks = selectedSubject?.tasks.length || 0;
-  const doneTasks = selectedSubject?.tasks.filter(t => t.done).length || 0;
+  const totalTasks = selectedSubject?.items.filter(i => i.type === 'task').length || 0;
+  const doneTasks = selectedSubject?.items.filter(i => i.type === 'task' && i.done).length || 0;
 
   return (
     <div
@@ -187,7 +183,7 @@ function App() {
       {/* Main area — 3 columns */}
       <div className="flex-1 flex overflow-hidden p-1 gap-1" style={{ minHeight: 0 }}>
         {/* LEFT: Задавальник */}
-        <div className="win-window flex flex-col" style={{ width: 240, flexShrink: 0 }}>
+        <div className="win-window flex flex-col" style={{ width: 180, flexShrink: 0 }}>
           <div className="win-titlebar">
             <div className="flex items-center gap-1 overflow-hidden">
               <span className="text-[11px]">📚</span>
@@ -201,53 +197,47 @@ function App() {
           <div className="flex gap-0 border-b border-[#808080] bg-[#c0c0c0] px-1">
             <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Файл</span>
             <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer" onClick={() => setShowAddSubject(true)}>
-              ➕ Добавить
+              ➕
             </span>
           </div>
           <div className="flex-1 overflow-auto bg-white m-[2px] win-border-inset p-2">
-            <div className="text-[11px] mb-2 font-bold">📂 Мои предметы:</div>
             {subjects.map(subj => {
               const isSelected = subj.id === selectedSubjectId;
-              const total = subj.tasks.length;
-              const done = subj.tasks.filter(t => t.done).length;
+              const total = subj.items.filter(i => i.type === 'task').length;
+              const done = subj.items.filter(i => i.type === 'task' && i.done).length;
               const pct = total > 0 ? Math.round((done / total) * 100) : 0;
               return (
                 <div
                   key={subj.id}
-                  className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer mb-1 ${
+                  className={`px-2 py-1.5 cursor-pointer mb-1 ${
                     isSelected ? 'bg-[#000080] text-white' : 'hover:bg-[#000080]/10'
                   }`}
                   onClick={() => setSelectedSubjectId(subj.id)}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    if (confirm(`Удалить "${subj.name}"?`)) handleDeleteSubject(subj.id);
+                    if (confirm(`Удалить "${subj.shortName}"?`)) handleDeleteSubject(subj.id);
                   }}
                 >
-                  <span className="text-[14px]">{subj.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] truncate font-semibold">{subj.shortName}</div>
-                    <div className="text-[9px] truncate opacity-70">{subj.name}</div>
-                    {total > 0 && (
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <div className={`flex-1 h-[6px] ${isSelected ? 'bg-white/30' : 'bg-[#c0c0c0]'} border border-[#808080]`}>
-                          <div
-                            className={`h-full ${isSelected ? 'bg-white' : 'bg-[#000080]'}`}
-                            style={{ width: `${pct}%` }}
-                          ></div>
-                        </div>
-                        <span className={`text-[9px] ${isSelected ? 'text-white' : 'text-[#808080]'}`}>
-                          {done}/{total}
-                        </span>
+                  <div className="text-[11px] font-semibold">{subj.shortName}</div>
+                  {total > 0 && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <div className={`flex-1 h-[6px] ${isSelected ? 'bg-white/30' : 'bg-[#c0c0c0]'} border border-[#808080]`}>
+                        <div
+                          className={`h-full ${isSelected ? 'bg-white' : 'bg-[#000080]'}`}
+                          style={{ width: `${pct}%` }}
+                        ></div>
                       </div>
-                    )}
-                  </div>
-                  {done === total && total > 0 && <span>✅</span>}
+                      <span className={`text-[9px] ${isSelected ? 'text-white' : 'text-[#808080]'}`}>
+                        {done}/{total}
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })}
             {subjects.length === 0 && (
               <div className="text-[11px] text-[#808080] text-center py-4">
-                Нет предметов. Нажмите "➕ Добавить"
+                Нет предметов
               </div>
             )}
           </div>
@@ -264,7 +254,7 @@ function App() {
             <div className="flex items-center gap-1 overflow-hidden">
               <span className="text-[11px]">📝</span>
               <span className="truncate">
-                {selectedSubject ? `Задачи — ${selectedSubject.shortName}` : 'Выберите предмет'}
+                {selectedSubject ? `${selectedSubject.shortName}` : 'Выберите предмет'}
               </span>
             </div>
             <div className="flex gap-[2px]">
@@ -275,8 +265,8 @@ function App() {
           </div>
           <div className="flex gap-0 border-b border-[#808080] bg-[#c0c0c0] px-1">
             <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Файл</span>
-            <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer" onClick={() => setShowAddTask(true)}>
-              ➕ Задача
+            <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer" onClick={() => setShowAddItem(true)}>
+              ➕
             </span>
             <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Вид</span>
           </div>
@@ -293,7 +283,7 @@ function App() {
               <>
                 {/* Stats */}
                 <div className="mb-3 flex items-center gap-3 text-[11px]">
-                  <span>Всего задач: <b>{totalTasks}</b></span>
+                  <span>Всего: <b>{totalTasks}</b></span>
                   <span>Выполнено: <b className="text-green-700">{doneTasks}</b></span>
                   <span>Осталось: <b className="text-red-700">{totalTasks - doneTasks}</b></span>
                   {totalTasks > 0 && (
@@ -305,57 +295,56 @@ function App() {
                   )}
                 </div>
 
-                {/* Tasks by week */}
-                {sortedWeeks.length > 0 ? (
-                  sortedWeeks.map(week => {
-                    const tasks = tasksByWeek[week];
-                    const weekDone = tasks.filter(t => t.done).length;
-                    const isExpanded = expandedWeeks.has(week);
-                    return (
-                      <div key={week} className="mb-3">
-                        <div
-                          className="flex items-center gap-2 cursor-pointer bg-[#c0c0c0] px-2 py-1 win-border-outset-thin"
-                          onClick={() => toggleWeek(week)}
-                        >
-                          <span className="text-[11px]">{isExpanded ? '▼' : '▶'}</span>
-                          <span className="text-[11px] font-bold">Неделя {week}</span>
-                          <span className="text-[10px] text-[#808080]">
-                            ({weekDone}/{tasks.length} выполнено)
-                          </span>
-                        </div>
-                        {isExpanded && (
-                          <div className="ml-4 mt-1">
-                            {tasks.map(task => (
-                              <div
-                                key={task.id}
-                                className="flex items-center gap-2 py-1 px-2 hover:bg-[#000080]/5"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={task.done}
-                                  onChange={() => handleToggleTask(task.id)}
-                                  className="cursor-pointer"
-                                />
-                                <span className={`text-[11px] flex-1 ${task.done ? 'line-through text-[#808080]' : ''}`}>
-                                  {task.title}
-                                </span>
-                                <button
-                                  className="text-[10px] text-red-600 hover:text-red-800 px-1"
-                                  onClick={() => handleDeleteTask(task.id)}
-                                  title="Удалить"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ))}
+                {/* Items list */}
+                {selectedSubject.items.length > 0 ? (
+                  <div className="space-y-1">
+                    {selectedSubject.items.map(item => {
+                      if (item.type === 'deadline') {
+                        return (
+                          <div key={item.id} className="flex items-center gap-2 py-2 px-2 bg-[#ffffcc] border border-[#cccc00] mt-3 first:mt-0">
+                            <span className="text-[11px]">📅</span>
+                            <span className="text-[11px] font-bold">{item.title}</span>
+                            <span className="text-[11px] text-[#808080]">— {formatDate(item.date)}</span>
+                            <button
+                              className="ml-auto text-[10px] text-red-600 hover:text-red-800 px-1"
+                              onClick={() => handleDeleteItem(item.id)}
+                              title="Удалить"
+                            >
+                              ✕
+                            </button>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })
+                        );
+                      } else {
+                        return (
+                          <div
+                            key={item.id}
+                            className={`flex items-center gap-2 py-1 px-2 cursor-pointer ${
+                              item.done ? 'bg-[#c0ffc0]' : 'hover:bg-[#000080]/5'
+                            }`}
+                            onClick={() => handleToggleTask(item.id)}
+                          >
+                            <span className={`text-[11px] font-mono w-[60px] ${item.done ? 'line-through text-[#808080]' : ''}`}>
+                              {item.number}
+                            </span>
+                            <span className={`text-[11px] flex-1 ${item.done ? 'line-through text-[#808080]' : ''}`}>
+                              {item.title}
+                            </span>
+                            {item.done && <span className="text-[11px]">✅</span>}
+                            <button
+                              className="text-[10px] text-red-600 hover:text-red-800 px-1"
+                              onClick={(e) => { e.stopPropagation(); handleDeleteItem(item.id); }}
+                              title="Удалить"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      }
+                    })}
+                  </div>
                 ) : (
                   <div className="text-[11px] text-[#808080] text-center py-8">
-                    Нет задач. Нажмите "➕ Задача" чтобы добавить.
+                    Нет задач. Нажмите "➕" чтобы добавить.
                   </div>
                 )}
               </>
@@ -376,7 +365,7 @@ function App() {
         <div className="win-window flex flex-col" style={{ width: 280, flexShrink: 0 }}>
           <div className="win-titlebar">
             <div className="flex items-center gap-1 overflow-hidden">
-              <span className="text-[11px]">{selectedSubject?.icon || '📁'}</span>
+              <span className="text-[11px]">📁</span>
               <span className="truncate">
                 {selectedSubject ? `Файлы — ${selectedSubject.shortName}` : 'Файлы'}
               </span>
@@ -389,7 +378,7 @@ function App() {
           <div className="flex gap-0 border-b border-[#808080] bg-[#c0c0c0] px-1">
             <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Файл</span>
             <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-              ➕ Добавить
+              ➕
             </span>
             <span className="px-2 py-0.5 text-[11px] hover:bg-[#000080] hover:text-white cursor-pointer">Вид</span>
           </div>
@@ -424,7 +413,7 @@ function App() {
               ))
             ) : (
               <div className="text-[11px] text-[#808080] text-center py-8">
-                {selectedSubject ? 'Нет файлов. Нажмите "➕ Добавить"' : 'Выберите предмет'}
+                {selectedSubject ? 'Нет файлов' : 'Выберите предмет'}
               </div>
             )}
           </div>
@@ -474,7 +463,7 @@ function App() {
       {/* Add Subject Dialog */}
       {showAddSubject && (
         <div className="fixed inset-0 flex items-center justify-center z-[99999]" style={{ background: 'rgba(0,0,0,0.3)' }}>
-          <div className="win-window-floating" style={{ width: 350 }}>
+          <div className="win-window-floating" style={{ width: 300 }}>
             <div className="win-titlebar">
               <div className="flex items-center gap-1">
                 <span className="text-[11px]">➕</span>
@@ -483,42 +472,17 @@ function App() {
               <button className="win-titlebar-btn" onClick={() => setShowAddSubject(false)}>✕</button>
             </div>
             <div className="p-4 bg-[#c0c0c0]">
-              <div className="space-y-3">
-                <div>
-                  <label className="text-[11px] block mb-1">Название:</label>
-                  <input
-                    type="text"
-                    value={newSubjectName}
-                    onChange={(e) => setNewSubjectName(e.target.value)}
-                    className="win-input w-full"
-                    placeholder="Математический анализ"
-                    autoFocus
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddSubject()}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] block mb-1">Краткое название:</label>
-                  <input
-                    type="text"
-                    value={newSubjectShort}
-                    onChange={(e) => setNewSubjectShort(e.target.value)}
-                    className="win-input w-full"
-                    placeholder="Матан"
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddSubject()}
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] block mb-1">Иконка (эмодзи):</label>
-                  <input
-                    type="text"
-                    value={newSubjectIcon}
-                    onChange={(e) => setNewSubjectIcon(e.target.value)}
-                    className="win-input w-full"
-                    placeholder="📚"
-                    maxLength={2}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddSubject()}
-                  />
-                </div>
+              <div>
+                <label className="text-[11px] block mb-1">Краткое название:</label>
+                <input
+                  type="text"
+                  value={newSubjectShort}
+                  onChange={(e) => setNewSubjectShort(e.target.value)}
+                  className="win-input w-full"
+                  placeholder="Матан"
+                  autoFocus
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddSubject()}
+                />
               </div>
               <div className="flex justify-end gap-2 mt-4">
                 <button className="win-btn" onClick={handleAddSubject}>OK</button>
@@ -529,47 +493,87 @@ function App() {
         </div>
       )}
 
-      {/* Add Task Dialog */}
-      {showAddTask && (
+      {/* Add Item Dialog */}
+      {showAddItem && (
         <div className="fixed inset-0 flex items-center justify-center z-[99999]" style={{ background: 'rgba(0,0,0,0.3)' }}>
           <div className="win-window-floating" style={{ width: 380 }}>
             <div className="win-titlebar">
               <div className="flex items-center gap-1">
                 <span className="text-[11px]">➕</span>
-                <span>Добавить задачу</span>
+                <span>Добавить {newItemType === 'task' ? 'задачу' : 'дедлайн'}</span>
               </div>
-              <button className="win-titlebar-btn" onClick={() => setShowAddTask(false)}>✕</button>
+              <button className="win-titlebar-btn" onClick={() => setShowAddItem(false)}>✕</button>
             </div>
             <div className="p-4 bg-[#c0c0c0]">
               <div className="space-y-3">
-                <div>
-                  <label className="text-[11px] block mb-1">Название задачи:</label>
-                  <input
-                    type="text"
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    className="win-input w-full"
-                    placeholder="Прочитать главу 5"
-                    autoFocus
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddTask()}
-                  />
+                <div className="flex gap-2">
+                  <button
+                    className={`win-btn flex-1 ${newItemType === 'task' ? 'font-bold' : ''}`}
+                    onClick={() => setNewItemType('task')}
+                  >
+                    Задача
+                  </button>
+                  <button
+                    className={`win-btn flex-1 ${newItemType === 'deadline' ? 'font-bold' : ''}`}
+                    onClick={() => setNewItemType('deadline')}
+                  >
+                    Дедлайн
+                  </button>
                 </div>
-                <div>
-                  <label className="text-[11px] block mb-1">Неделя:</label>
-                  <input
-                    type="number"
-                    value={newTaskWeek}
-                    onChange={(e) => setNewTaskWeek(parseInt(e.target.value) || 1)}
-                    className="win-input w-20"
-                    min={1}
-                    max={52}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddTask()}
-                  />
-                </div>
+                {newItemType === 'task' ? (
+                  <>
+                    <div>
+                      <label className="text-[11px] block mb-1">Номер задачи:</label>
+                      <input
+                        type="text"
+                        value={newItemNumber}
+                        onChange={(e) => setNewItemNumber(e.target.value)}
+                        className="win-input w-full"
+                        placeholder="1.2.102"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] block mb-1">Описание:</label>
+                      <input
+                        type="text"
+                        value={newItemTitle}
+                        onChange={(e) => setNewItemTitle(e.target.value)}
+                        className="win-input w-full"
+                        placeholder="Вычислить интеграл"
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="text-[11px] block mb-1">Название:</label>
+                      <input
+                        type="text"
+                        value={newItemTitle}
+                        onChange={(e) => setNewItemTitle(e.target.value)}
+                        className="win-input w-full"
+                        placeholder="Контрольная работа"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] block mb-1">Дата:</label>
+                      <input
+                        type="date"
+                        value={newItemDate}
+                        onChange={(e) => setNewItemDate(e.target.value)}
+                        className="win-input w-full"
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <div className="flex justify-end gap-2 mt-4">
-                <button className="win-btn" onClick={handleAddTask}>OK</button>
-                <button className="win-btn" onClick={() => setShowAddTask(false)}>Отмена</button>
+                <button className="win-btn" onClick={handleAddItem}>OK</button>
+                <button className="win-btn" onClick={() => setShowAddItem(false)}>Отмена</button>
               </div>
             </div>
           </div>
